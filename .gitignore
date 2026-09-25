@@ -1,0 +1,6 @@
+output/
+*.bin
+*.out
+figures/
+.vscode/
+models/

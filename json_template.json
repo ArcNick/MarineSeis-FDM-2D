@@ -1,0 +1,50 @@
+{
+  "base": {
+    "fpeak": 30.0,
+    "dt": 0.0001,
+    "nt": 30001,
+    "snapshot": 200
+  },
+  "grid": {
+    "calc_type": 1,
+    "boundary_type": 2,
+    "src_pos": {
+      "posx": [
+        250
+      ],
+      "posz": [
+        60
+      ]
+    },
+    "solid": {
+      "nx": 501,
+      "nz": 381,
+      "C11": "models/iso_FANDS_PANDF_wavy_if/solid/C11.bin",
+      "C13": "models/iso_FANDS_PANDF_wavy_if/solid/C13.bin",
+      "C33": "models/iso_FANDS_PANDF_wavy_if/solid/C33.bin",
+      "C55": "models/iso_FANDS_PANDF_wavy_if/solid/C55.bin",
+      "rho": "models/iso_FANDS_PANDF_wavy_if/solid/rho.bin"
+    },
+    "jacob": {
+      "J": "models/iso_FANDS_PANDF_wavy_if/jacob/J.bin",
+      "xi_x": "models/iso_FANDS_PANDF_wavy_if/jacob/xi_x.bin",
+      "xi_z": "models/iso_FANDS_PANDF_wavy_if/jacob/xi_z.bin",
+      "ze_x": "models/iso_FANDS_PANDF_wavy_if/jacob/ze_x.bin",
+      "ze_z": "models/iso_FANDS_PANDF_wavy_if/jacob/ze_z.bin"
+    },
+    "fluid": {
+      "nx": 501,
+      "nz": 201,
+      "K": "models/iso_FANDS_PANDF_wavy_if/fluid/K.bin",
+      "rho": "models/iso_FANDS_PANDF_wavy_if/fluid/rho.bin"
+    }
+  },
+  "PML": {
+    "npd": 20,
+    "thickness": 47.5,
+    "NPOW": 2,
+    "Vp_max": 3200.0,
+    "Rc": 0.001,
+    "beta0": 5.0
+  }
+}
