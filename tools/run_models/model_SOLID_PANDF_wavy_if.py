@@ -1,13 +1,13 @@
 """两层各向同性固体 + 自由表面 + 起伏固固界面（矩形域、贴体网格）。
 
-几何与 model_iso_FANDS_PANDF_wavy.py 完全相同：
+几何与 model_FANDS_PANDF_wavy.py 完全相同：
     x(ξ,ζ) = h ξ
     z(ξ,ζ) = h ζ + A_i sin(2πx/λ_i) w_i(ζ) + A_f sin(2πx/λ_f) w_f(ζ)
 自由表面在 ζ=3；固固界面在 ζ=nz_upper。上下两层用同一套 C11/C13/C33/C55/rho
 场表示，因此界面就是正常 welded solid-solid 边界。
 
 在项目根目录直接运行：
-    python3 tools/run_models/model_iso_SOLID_PANDF_wavy_if.py
+    python3 tools/run_models/model_SOLID_PANDF_wavy_if.py
 """
 import json
 import os
@@ -20,32 +20,34 @@ try:
 except ImportError:
     plt = None
 
-# ============================ 算例参数 ============================
-case = "iso_SOLID_PANDF_wavy_if"
+#==============================
+# 算例参数
+#==============================
+case = "SOLID_PANDF_wavy_if"
 
 DIRI, CPML, PANDF = 0, 1, 2
 SOLID, FANDS = 0, 1
 
 calc_type = SOLID
-boundary_type = PANDF
+boundary_type = CPML
 
 fpeak = 30.0
 dt = 1e-4
-nt = 30001
+nt = 10001
 snapshot = 200
 
-nx = 501
-nz_upper = 200
-nz_lower = 381
+nx = 1501
+nz_upper = 600
+nz_lower = 600
 nz = nz_upper + nz_lower
 h = 2.5
 src_pos_x = [250]
-src_pos_z = [60]                    # 震源在上层固体
+src_pos_z = [560]                    # 震源在上层固体
 
 # 与流固 wavy 模型保持同一套几何起伏
-amp_interface = 50.0
+amp_interface = 0.0
 wavelength_interface = 500.0
-amp_surface = 12.5
+amp_surface = 0.0
 wavelength_surface = 1000.0
 
 # 上层软固体：Vp 由合理泊松比给出，rho 取常见浅层沉积物值
@@ -54,20 +56,22 @@ vs_upper = 1500.0
 rho_upper = 1800.0
 
 # 下层硬固体：用户给定
-vp_lower = 3200.0
-vs_lower = 1732.0
-rho_lower = 2000.0
+vp_lower = 4800.0
+vs_lower = 2432.0
+rho_lower = 2500.0
 
 npd = 20
 NPOW = 2
-vp_max = 3200.0
+vp_max = 4800.0
 Rc = 1e-3
 ppw0 = 8
 
 show_model = True
 cuda_bin = "./bin/main_debug"
-# ==================================================================
 
+#==============================
+# 绘图接口（供 plot_wavefield.py 用）
+#==============================
 # 供 plot_wavefield.py import：界面名 -> 全局 ζ 行号
 interface = {
     "free_surface": 3,
@@ -82,6 +86,9 @@ if __name__ == "__main__":
 
     zeta0 = float(nz_upper)                  # 固固界面网格行
     b_pml = float(nz - 4 - npd)              # 起伏包络在 PML 内归零
+#==============================
+# 网格与坐标
+#==============================
     zeta = np.arange(nz, dtype=np.float64)
     xive = np.arange(nx, dtype=np.float64)
 
@@ -89,6 +96,9 @@ if __name__ == "__main__":
     xi = h * xive / wavelength_interface
     xf = h * xive / wavelength_surface
 
+#==============================
+# 起伏包络
+#==============================
     # 界面起伏包络：自由表面行 3 以下逐渐打开，底部 PML 内归零
     w_i = np.zeros(nz)
     dw_i = np.zeros(nz)
@@ -136,6 +146,9 @@ if __name__ == "__main__":
     ze_x = -dz_dxi / J
     ze_z = h / J
 
+#==============================
+# 介质参数
+#==============================
     # 两层各向同性弹性参数
     C11_u = rho_upper * vp_upper ** 2
     C55_u = rho_upper * vs_upper ** 2
@@ -151,6 +164,9 @@ if __name__ == "__main__":
     C55 = np.where(upper, C55_u, C55_l).astype("<f4")
     rho = np.where(upper, rho_upper, rho_lower).astype("<f4")
 
+#==============================
+# 写模型二进制（solid / fluid / jacob）
+#==============================
     model_dir = os.path.join("models", case)
     solid_dir = os.path.join(model_dir, "solid")
     jacob_dir = os.path.join(model_dir, "jacob")
@@ -168,6 +184,9 @@ if __name__ == "__main__":
     beta0 = min(vs_upper, vs_lower) / (0.5 * ppw0 * h * fpeak)
     thickness = (npd - 1) * h
 
+#==============================
+# 写 JSON 与 pad.txt
+#==============================
     json_path = os.path.join(model_dir, case + ".json")
     with open(json_path, "w") as f:
         json.dump({
@@ -197,6 +216,9 @@ if __name__ == "__main__":
                     "Vp_max": vp_max, "Rc": Rc, "beta0": round(beta0, 4)},
         }, f, indent=2)
         f.write("\n")
+#==============================
+# 自检输出
+#==============================
     print(f"[model] {nx} x {nz} (upper {nz_upper} + lower {nz_lower}), "
           f"h = {h} m")
     print(f"[model] upper: Vp={vp_upper}, Vs={vs_upper}, rho={rho_upper}")
@@ -206,6 +228,9 @@ if __name__ == "__main__":
     print(f"[model] beta0 = {beta0:.4f} (eq.41, C = min Vs), npd = {npd}")
     print(f"[model] json   : {json_path}")
 
+#==============================
+# 模型预览（可选）
+#==============================
     if show_model and plt is not None:
         vp_map = np.where(upper, vp_upper, vp_lower)
         fig, ax = plt.subplots(figsize=(7, 6))
@@ -234,6 +259,9 @@ if __name__ == "__main__":
     elif show_model:
         print("[model] matplotlib unavailable; skipped model preview")
 
+#==============================
+# 运行求解器
+#==============================
     out_root = os.path.join("output", case)
     subprocess.run([cuda_bin, json_path, out_root], check=True)
     print(f"[model] snapshots: {out_root}/<shot>/snapshot/solid/vz/")

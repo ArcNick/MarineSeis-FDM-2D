@@ -2,7 +2,7 @@
 各向同性均匀固体 + 自由表面(PANDF) + 正交网格：生成模型并跑正演。
 
 在项目根目录下直接运行:
-python model_iso_SOLID_PANDF_ortho.py
+python model_SOLID_PANDF_ortho.py
 
 产出:
     models/<case>/{solid,jacob}/*.bin, <case>.json  模型与度规、求解器输入
@@ -21,8 +21,10 @@ try:                                # 只为可选的模型预览；没装 matpl
 except ImportError:
     plt = None
 
-# ============================ 算例参数 ============================
-case = "iso_SOLID_PANDF_ortho"      # models/<case>/ 与 output/<case>/ 都用它
+#==============================
+# 算例参数
+#==============================
+case = "SOLID_PANDF_ortho"      # models/<case>/ 与 output/<case>/ 都用它
 
 DIRI, CPML, PANDF = 0, 1, 2         # boundary_type
 SOLID, FANDS = 0, 1                 # calc_type
@@ -55,8 +57,10 @@ ppw0 = 8                            # 论文式(41) 要求的最少每波长点�
 
 show_model = True                   # 是否弹窗看模型（批处理时设 False）
 cuda_bin = "./bin/main_debug"       # 必须在项目根目录下运行
-# ==================================================================
 
+#==============================
+# 绘图接口（供 plot_wavefield.py 用）
+#==============================
 # 供 plot_wavefield.py import：当前模型没有内部界面/自由表面线
 interface = {}
 
@@ -69,9 +73,15 @@ if __name__ == "__main__":
     C11_e = C33_e * (1 + 2 * epsilon)
     C13_e = ((C33_e - C55_e) * (2 * C33_e * delta + (C33_e - C55_e))) ** 0.5 - C55_e
 
+#==============================
+# 派生量：PML 厚度 / beta0
+#==============================
     thickness = (npd - 1) * h
     beta0 = vs / (0.5 * ppw0 * h * fpeak)
     # beta0 = 4
+#==============================
+# 写模型二进制（solid / fluid / jacob）
+#==============================
     model_dir = os.path.join("models", case)
     solid_dir = os.path.join(model_dir, "solid")
     jacob_dir = os.path.join(model_dir, "jacob")
@@ -90,6 +100,9 @@ if __name__ == "__main__":
     X.astype("<f4").tofile(os.path.join(jacob_dir, "x.bin"))    # 后处理用
     Z.astype("<f4").tofile(os.path.join(jacob_dir, "z.bin"))
 
+#==============================
+# 写 JSON 与 pad.txt
+#==============================
     json_path = os.path.join(model_dir, case + ".json")
     with open(json_path, "w") as f:
         json.dump({
@@ -118,12 +131,18 @@ if __name__ == "__main__":
                     "Vp_max": vp_max, "Rc": Rc, "beta0": round(beta0, 4)},
         }, f, indent=2)
         f.write("\n")
+#==============================
+# 自检输出
+#==============================
     print(f"[model] {nx_solid} x {nz_solid}, h = {h} m, dt = {dt} s, nt = {nt} "
           f"({nt * dt:.3f} s), CFL = {vp * dt / h:.3f}")
     print(f"[model] beta0 = {beta0:.4f} (式(41), C = Vs = {vs}), npd = {npd}, "
           f"thickness = {thickness} m")
     print(f"[model] json   : {json_path}")
 
+#==============================
+# 模型预览（可选）
+#==============================
     if show_model and plt is not None:
         # 背景：Vp 分布（均匀模型就是常数；将来分层/起伏模型直接换成真实 Vp 场）
         Xm, Zm = np.meshgrid(np.arange(nx_solid) * h, np.arange(nz_solid) * h)
@@ -154,6 +173,9 @@ if __name__ == "__main__":
     elif show_model:
         print("[model] 没装 matplotlib，跳过模型预览")
     
+#==============================
+# 运行求解器
+#==============================
     out_root = os.path.join("output", case)
     subprocess.run([cuda_bin, json_path, out_root], check=True)
     print(f"[model] snapshots: {out_root}/<炮号>/snapshot/  记录: .../record/")

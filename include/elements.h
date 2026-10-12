@@ -71,7 +71,6 @@ struct PML_cfs {
     float p_beta;
     float p_alpha;
     float alpha0;
-    int   p_d;
 };
 
 // ---------------------------------------------------------------------------
@@ -317,5 +316,7 @@ extern __constant__ int nx_all, nz_all;
 extern __constant__ int nx_f, nz_f;
 extern __constant__ int nx_s, nz_s;
 extern __constant__ float GAUSS_W[5];       // k=-2..2，已归一化
+extern __constant__ float GAUSS_W7[7];      // 同上，嵌在 7 点里（物理域用）
+extern __constant__ float GAUSS_W7_PML[7];  // PML 内更强滤波
 
 #endif

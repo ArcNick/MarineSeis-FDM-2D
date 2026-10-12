@@ -34,8 +34,8 @@ figures/<case>/shot<炮号>_vz_<步号>.png
 
 ```
 ./bin/main_debug <model.json> <out_root>          # 必须在项目根目录下运行
-# 例: ./bin/main_debug models/iso_SOLID_PANDF_ortho/iso_SOLID_PANDF_ortho.json \
-                      output/iso_SOLID_PANDF_ortho
+# 例: ./bin/main_debug models/SOLID_PANDF_ortho/SOLID_PANDF_ortho.json \
+                      output/SOLID_PANDF_ortho
 ```
 
 不再使用 `MFDM_SNAP_DIR` 环境变量。
@@ -46,8 +46,8 @@ figures/<case>/shot<炮号>_vz_<步号>.png
   不写命令行参数解析，直接 `python3 xxx.py` 就能跑；工具函数不要堆在文件开头。
 * 路径用相对路径，运行位置固定在项目根目录（脚本会检查 `src/` 与 `bin/main_debug`）。
 * 已按此标准的脚本：
-  * `model_iso_SOLID_PANDF_ortho.py`（纯固体 + 自由表面 + 正交网格）
-  * `model_iso_FANDS_PANDF_wavy.py`（流固 + 起伏界面/起伏自由表面）
+  * `model_SOLID_PANDF_ortho.py`（纯固体 + 自由表面 + 正交网格）
+  * `model_FANDS_PANDF_wavy.py`（流固 + 起伏界面/起伏自由表面）
   * `plot_wavefield.py`（拼接 fluid/solid 的 vz，每个时间步一张图；色标整段固定，
     多线程出图，线程数 = CPU 总线程数 - 2，线程池复用）
 
@@ -63,4 +63,4 @@ figures/<case>/shot<炮号>_vz_<步号>.png
 * **J 存正雅可比** `J=det(∂(x,z)/∂(ξ,ζ))`；正交网格 `J=h²`、`ξ_x=ζ_z=1/h`、
   `ξ_z=ζ_x=0`（竖直列网格上 `ξ_z` 必须为 0，别和 `ζ_x` 写反）。
 * 曲线网格（起伏地形）**必须保证 PML 物理厚度沿边界处处相同**：起伏包络要在
-  PML 带内归零，`model_iso_FANDS_PANDF_wavy.py` 生成时会打印逐列/逐行厚度自检。
+  PML 带内归零，`model_FANDS_PANDF_wavy.py` 生成时会打印逐列/逐行厚度自检。

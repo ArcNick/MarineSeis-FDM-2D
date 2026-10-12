@@ -4,3 +4,6 @@ output/
 figures/
 .vscode/
 models/
+tools/__pycache__/
+sem/
+dispersion_image.png

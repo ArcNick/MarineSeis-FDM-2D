@@ -613,20 +613,40 @@ A_{zz} &= \frac{g^{\xi\xi} - g^{\xi\zeta} m_{22}}{g^{\xi\xi}}.
 \tag{A-coeff}
 $$
 
+（自由表面行的 PML 修正不直接用 $A$：$\zeta$ 导数的消去必须在**已拉伸**的方程上做，
+因此修正项与主项用同一组 $\alpha$ 组合，见 §5.2.3；$A$ 只用于说明
+$D_1^{\xi}$ 与 $\xi$ 导数之间的关系。）
+
 ### 5.2.3 自由表面处最终应力方程
+
+$\alpha$ 组合 (alpha-coeff) 同时作用在速度的 $\xi$ 导数与记忆变量上：
+
+$$
+\begin{aligned}
+\mathcal{V}_x &= \alpha_{11}^{xx} v_{x,\xi} + \alpha_{12}^{xx} v_{z,\xi},
+&\qquad
+\mathcal{E}_x &= \alpha_{11}^{xx} E_x^{\xi} + \alpha_{12}^{xx} E_z^{\xi},
+\\[2pt]
+\mathcal{V}_z &= \alpha_{11}^{zz} v_{x,\xi} + \alpha_{12}^{zz} v_{z,\xi},
+&\qquad
+\mathcal{E}_z &= \alpha_{11}^{zz} E_x^{\xi} + \alpha_{12}^{zz} E_z^{\xi},
+\\[2pt]
+\mathcal{V}_{xz} &= \alpha_{11}^{xz} v_{x,\xi} + \alpha_{12}^{xz} v_{z,\xi},
+&\qquad
+\mathcal{E}_{xz} &= \alpha_{11}^{xz} E_x^{\xi} + \alpha_{12}^{xz} E_z^{\xi}.
+\end{aligned}
+\tag{fs-comb}
+$$
 
 $$
 \boxed{
 \begin{aligned}
 \sigma_{xx,t}
-&= \Bigl[ C_{11}\alpha_{11}^{xx} + C_{13}\alpha_{11}^{zz} \Bigr] v_{x,\xi}
-+ \Bigl[ C_{11}\alpha_{12}^{xx} + C_{13}\alpha_{12}^{zz} \Bigr] v_{z,\xi} \\[2pt]
-&\quad + \Bigl(\frac{1}{\beta_{\xi}}-1\Bigr)
-\Bigl[ C_{11}\xi_{,x} A_{xx} + C_{13}\xi_{,z} A_{zx} \Bigr] v_{x,\xi} \\[2pt]
-&\quad + \Bigl(\frac{1}{\beta_{\xi}}-1\Bigr)
-\Bigl[ C_{11}\xi_{,x} A_{xz} + C_{13}\xi_{,z} A_{zz} \Bigr] v_{z,\xi} \\[2pt]
-&\quad - \frac{C_{11}\xi_{,x}}{\beta_{\xi}} E_x^{\xi}
-- \frac{C_{13}\xi_{,z}}{\beta_{\xi}} E_z^{\xi}.
+&= \bigl[ C_{11}\mathcal{V}_x + C_{13}\mathcal{V}_z \bigr]
++ \Bigl(\frac{1}{\beta_{\xi}}-1\Bigr)
+\bigl[ C_{11}\mathcal{V}_x + C_{13}\mathcal{V}_z \bigr]
+- \frac{1}{\beta_{\xi}}
+\bigl[ C_{11}\mathcal{E}_x + C_{13}\mathcal{E}_z \bigr].
 \end{aligned}
 }
 \tag{Sxx-fs-final}
@@ -636,14 +656,11 @@ $$
 \boxed{
 \begin{aligned}
 \sigma_{zz,t}
-&= \Bigl[ C_{13}\alpha_{11}^{xx} + C_{33}\alpha_{11}^{zz} \Bigr] v_{x,\xi}
-+ \Bigl[ C_{13}\alpha_{12}^{xx} + C_{33}\alpha_{12}^{zz} \Bigr] v_{z,\xi} \\[2pt]
-&\quad + \Bigl(\frac{1}{\beta_{\xi}}-1\Bigr)
-\Bigl[ C_{13}\xi_{,x} A_{xx} + C_{33}\xi_{,z} A_{zx} \Bigr] v_{x,\xi} \\[2pt]
-&\quad + \Bigl(\frac{1}{\beta_{\xi}}-1\Bigr)
-\Bigl[ C_{13}\xi_{,x} A_{xz} + C_{33}\xi_{,z} A_{zz} \Bigr] v_{z,\xi} \\[2pt]
-&\quad - \frac{C_{13}\xi_{,x}}{\beta_{\xi}} E_x^{\xi}
-- \frac{C_{33}\xi_{,z}}{\beta_{\xi}} E_z^{\xi}.
+&= \bigl[ C_{13}\mathcal{V}_x + C_{33}\mathcal{V}_z \bigr]
++ \Bigl(\frac{1}{\beta_{\xi}}-1\Bigr)
+\bigl[ C_{13}\mathcal{V}_x + C_{33}\mathcal{V}_z \bigr]
+- \frac{1}{\beta_{\xi}}
+\bigl[ C_{13}\mathcal{E}_x + C_{33}\mathcal{E}_z \bigr].
 \end{aligned}
 }
 \tag{Szz-fs-final}
@@ -653,16 +670,32 @@ $$
 \boxed{
 \begin{aligned}
 \sigma_{xz,t}
-&= C_{55} \Bigl[ \alpha_{11}^{xz} v_{x,\xi} + \alpha_{12}^{xz} v_{z,\xi} \Bigr] \\[2pt]
-&\quad + C_{55}\Bigl(\frac{1}{\beta_{\xi}}-1\Bigr)
-\Bigl[ \xi_{,z} \bigl( A_{xx} v_{x,\xi} + A_{xz} v_{z,\xi} \bigr)
-+ \xi_{,x} \bigl( A_{zx} v_{x,\xi} + A_{zz} v_{z,\xi} \bigr) \Bigr] \\[2pt]
-&\quad - \frac{C_{55}}{\beta_{\xi}}
-\Bigl[ \xi_{,z} E_x^{\xi} + \xi_{,x} E_z^{\xi} \Bigr].
+&= C_{55}\mathcal{V}_{xz}
++ C_{55}\Bigl(\frac{1}{\beta_{\xi}}-1\Bigr)\mathcal{V}_{xz}
+- \frac{C_{55}}{\beta_{\xi}}\mathcal{E}_{xz}.
 \end{aligned}
 }
 \tag{Sxz-fs-final}
 $$
+
+主项与 PML 修正项用同一组系数，等价形式：
+
+$$
+\sigma_{xx,t}=\frac{1}{\beta_{\xi}}\bigl[ C_{11}(\mathcal{V}_x-\mathcal{E}_x)
++ C_{13}(\mathcal{V}_z-\mathcal{E}_z) \bigr],
+$$
+
+$$
+\sigma_{zz,t}=\frac{1}{\beta_{\xi}}\bigl[ C_{13}(\mathcal{V}_x-\mathcal{E}_x)
++ C_{33}(\mathcal{V}_z-\mathcal{E}_z) \bigr],
+\qquad
+\sigma_{xz,t}=\frac{C_{55}}{\beta_{\xi}}(\mathcal{V}_{xz}-\mathcal{E}_{xz}).
+\tag{fs-final-compact}
+$$
+
+平直表面（$h$ 为均匀网格间距，$\xi_{,x}=\zeta_{,z}=h^{-1}$、其余度量为 0）时
+$C_{11}\alpha_{11}^{xx}+C_{13}\alpha_{11}^{zz}=(C_{11}-C_{13}^{2}/C_{33})/h$，
+即平面应力模量。
 
 ### 5.2.4 自由表面处记忆变量 $E$ 更新方程
 
@@ -671,13 +704,11 @@ $$
 \begin{aligned}
 E_{x,t}^{\xi}
 + \Bigl(\alpha_{\xi}+\frac{d_{\xi}}{\beta_{\xi}}\Bigr) E_x^{\xi}
-&= \frac{d_{\xi}}{\beta_{\xi}}
-\bigl( A_{xx} v_{x,\xi} + A_{xz} v_{z,\xi} \bigr),
+&= \frac{d_{\xi}}{\beta_{\xi}}\, v_{x,\xi},
 \\[4pt]
 E_{z,t}^{\xi}
 + \Bigl(\alpha_{\xi}+\frac{d_{\xi}}{\beta_{\xi}}\Bigr) E_z^{\xi}
-&= \frac{d_{\xi}}{\beta_{\xi}}
-\bigl( A_{zx} v_{x,\xi} + A_{zz} v_{z,\xi} \bigr).
+&= \frac{d_{\xi}}{\beta_{\xi}}\, v_{z,\xi}.
 \end{aligned}
 }
 \tag{E-fs-final}
@@ -737,6 +768,26 @@ $$
 
 ---
 
+## 5.4 流体自由表面
+
+声学侧的面力为 $-p\,\boldsymbol n$；自由表面要求 $-p\boldsymbol n=\boldsymbol 0$，
+而 $\boldsymbol n\neq\boldsymbol 0$，故
+
+$$
+\boxed{\,p\big|_{\zeta=\zeta_{\rm FS}}\equiv 0\,}
+\tag{p-fs}
+$$
+
+$$
+\boxed{\,p_{,t}\big|_{\zeta=\zeta_{\rm FS}}=0\,}
+\tag{p-dot-fs}
+$$
+
+与表面倾角无关（流体各向同性，没有切向面力分量），因此流体侧不需要 $\alpha$ 组合：
+压力方程在自由表面行直接取零，该行不做 $\xi$ 方向的 PML 修正。
+
+---
+
 # 6. 流固耦合边界
 
 ## 6.1 流固边界条件
@@ -792,12 +843,13 @@ $$
 | MV-$\xi$-cons | $\xi$ 方向 PML 动量记忆变量 | 守恒 | 矢量 |
 | M-$\zeta$-cons | $\zeta$ 方向 PML 动量方程 | 守恒 | 矢量 $\boldsymbol{V}^{\zeta}$ |
 | MV-$\zeta$-cons | $\zeta$ 方向 PML 动量记忆变量 | 守恒 | 矢量 |
-| Sxx-fs-final | 自由表面 $\sigma_{xx}$ 方程 | 非守恒（消去 $\zeta$ 导数） | 标量 |
-| Szz-fs-final | 自由表面 $\sigma_{zz}$ 方程 | 非守恒（消去 $\zeta$ 导数） | 标量 |
-| Sxz-fs-final | 自由表面 $\sigma_{xz}$ 方程 | 非守恒（消去 $\zeta$ 导数） | 标量 |
-| E-fs-final | 自由表面本构记忆变量 | 非守恒（消去 $\zeta$ 导数） | 标量 |
+| Sxx-fs-final | 自由表面 $\sigma_{xx}$ 方程 | 消去 $\zeta$ 导数；PML 项与主项同系数 | 标量 |
+| Szz-fs-final | 自由表面 $\sigma_{zz}$ 方程 | 消去 $\zeta$ 导数；PML 项与主项同系数 | 标量 |
+| Sxz-fs-final | 自由表面 $\sigma_{xz}$ 方程 | 消去 $\zeta$ 导数；PML 项与主项同系数 | 标量 |
+| E-fs-final | 自由表面本构记忆变量 | 由 $v_{x,\xi},v_{z,\xi}$ 驱动 | 标量 |
 | M-fs | 自由表面动量方程 | 混合（物理散度守恒 + PML 项非守恒） | 矢量 |
 | MV-fs | 自由表面动量记忆变量 | 混合 | 矢量 |
+| p-fs | 流体自由表面压力 | $p\equiv0$ | 无 |
 
 ## 7.2 记忆变量体系
 

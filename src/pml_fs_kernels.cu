@@ -429,7 +429,7 @@ __global__ void fl_so_filter(
     U_fluid Uf, U_solid Us, Flux flux
 ) {
     constexpr int B = 128;
-    constexpr int HALO = 2;
+    constexpr int HALO = 3;
     constexpr int NF = 8;
 
     __shared__ float tile[NF][B + 2 * HALO];
@@ -445,6 +445,7 @@ __global__ void fl_so_filter(
 
     const int le = 3;
     const int ri = nx_all - 4;
+    const int pad = pml_span_d + 3;          // 外侧 3 冻结 + npd PML
     const int base = blockIdx.x * B;
 
     for (int f = 0; f < NF; ++f) {
@@ -467,9 +468,12 @@ __global__ void fl_so_filter(
     const int k_lo = max(-HALO, le - ix);
     const int k_hi = min(HALO, ri - ix);
 
+    // 整条流固界面行统一用 7 点高斯滤波（σ=0.55，Nyquist 响应 0.863）
+    const float *W = GAUSS_W7_PML;
+
     float weight_sum = 0.0f;
     for (int k = k_lo; k <= k_hi; ++k) {
-        weight_sum += GAUSS_W[k + 2];
+        weight_sum += W[k + HALO];
     }
 
     float val[NF];
@@ -478,7 +482,7 @@ __global__ void fl_so_filter(
         float sum = 0.0f;
 
         for (int k = k_lo; k <= k_hi; ++k) {
-            sum += GAUSS_W[k + 2] * tile[f][c + k];
+            sum += W[k + HALO] * tile[f][c + k];
         }
 
         val[f] = sum / weight_sum;
@@ -907,9 +911,9 @@ void apply_cerjan(
 
     const int block = 256;
     const int grid = (mem.nx + block - 1) / block;
-    sponge_interface_rows<<<grid, block, 0, sm_vel_f>>>(
-        mem.Uf_d, mem.Us_d, mem.sponge_x_d
-    );
+    // sponge_interface_rows<<<grid, block, 0, sm_vel_f>>>(
+    //     mem.Uf_d, mem.Us_d, mem.sponge_x_d
+    // );
 
     CHECK(cudaEventRecord(ev_done, sm_vel_f));
     for (int i = 1; i < 4; ++i) CHECK(cudaStreamWaitEvent(all[i], ev_done, 0));

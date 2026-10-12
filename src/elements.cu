@@ -18,6 +18,19 @@ __constant__ int pml_span_d;
 __constant__ float GAUSS_W[5] = {
     2.1311488e-08f, 0.011866694f, 0.97626656f, 0.011866694f, 2.1311488e-08f
 };
+// 7 点版本：物理域用的就是孙耀充论文那套 5 点（外两点为 0）。
+__constant__ float GAUSS_W7[7] = {
+    0.0f, 2.1311488e-08f, 0.011866694f, 0.97626656f,
+    0.011866694f, 2.1311488e-08f, 0.0f
+};
+// 流固界面行统一使用的滤波：7 点高斯 σ=0.55（中心 0.9316，Nyquist 响应 0.863，
+// 比论文那套 0.952 强约 3 倍）。整条界面（含 PML 段）都用它，不用 Cerjan。
+// σ 越小越接近论文滤波、虚假反射越小，但 σ=0.4（中心 0.996）会失稳，
+// 0.5（0.965）是实测能稳住的最弱一档。
+__constant__ float GAUSS_W7_PML[7] = {
+    1.1e-13f, 1.678e-06f, 0.03419f, 0.93163f,
+    0.03419f, 1.678e-06f, 1.1e-13f
+};
 __constant__ float SRC_GAUSS_W[5][5] = {
     {0.0030f, 0.0133f, 0.0219f, 0.0133f, 0.0030f},
     {0.0133f, 0.0596f, 0.0983f, 0.0596f, 0.0133f},
@@ -100,13 +113,12 @@ MemManager::MemManager(const char *filename) {
     if (bdy_type == DIRI || calc_type != FANDS || npd < 2) {
         cerjan_width = 0;
     } else {
-        cerjan_width = std::max(1, npd / 2);
+        cerjan_width = std::max(3, (int)(npd * 3.0 / 10));
     }
-    cerjan_a     = 0.03f;
+    cerjan_a     = 0.025f;
     pml_span     = npd;
 
     pml_cfs.beta0   = beta0;
-    pml_cfs.p_d     = NPOW;
     pml_cfs.p_beta  = 2.0f;
     pml_cfs.p_alpha = 1.0f;
     pml_cfs.alpha0  = 2 * float(M_PI) * fpeak;
@@ -321,8 +333,10 @@ void MemManager::grid_cp_h2d() {
 }
 
 void MemManager::U_cp_d2h() const {
+    CHECK(cudaMemcpy(Us_h.vx, Us_d.vx, nx_solid * nz_solid * sizeof(float), cudaMemcpyDeviceToHost));
     CHECK(cudaMemcpy(Us_h.vz, Us_d.vz, nx_solid * nz_solid * sizeof(float), cudaMemcpyDeviceToHost));
     if (calc_type == FANDS) {
+        CHECK(cudaMemcpy(Uf_h.vx, Uf_d.vx, nx_fluid * nz_fluid * sizeof(float), cudaMemcpyDeviceToHost));
         CHECK(cudaMemcpy(Uf_h.vz, Uf_d.vz, nx_fluid * nz_fluid * sizeof(float), cudaMemcpyDeviceToHost));
         CHECK(cudaMemcpy(Uf_h.p,  Uf_d.p,  nx_fluid * nz_fluid * sizeof(float), cudaMemcpyDeviceToHost));
     }
@@ -369,7 +383,7 @@ void MemManager::RK4_reset() {
 }
 
 float MemManager::ricker(float time) const {
-    static float T = 1.25 / fpeak;
+    static float T = 1.2 / fpeak;
     float t = time - T;
     if (t > T) return 0.0f;
     float temp = M_PI * fpeak * t;
@@ -766,7 +780,7 @@ void MemManager::build_sponge() {
     }
 
     CHECK(cudaMemcpy(sponge_x_d, gx, nx * sizeof(float), cudaMemcpyHostToDevice));
-    printf("[Cerjan/FSI] interface rows + %d Cerjan cells (= npd/2), a = %.3f, "
+    printf("[Cerjan/FSI] interface rows + %d Cerjan cells (= 3/10 npd), a = %.3f, "
            "edge factor = %.6e\n",
            cerjan_width, cerjan_a,
            expf(-cerjan_a * float(cerjan_width * cerjan_width)));
@@ -811,11 +825,14 @@ void MemManager::calc_pml_par() {
     if (bdy_type == DIRI) {
         return;
     }
-    // damp factor : Collino & Tsogka, 2001
-    const float damp0  = -(NPOW + 1) * Vp_max * std::log(Rc) / (2.0f * thickness);
-    printf("[PML] beta0 = %.3f, p_d = %d, p_beta = %.2f, p_alpha = %.2f,"
+    // 余弦剖面 d(r)=d0/2*[1-cos(pi*r)] 的积分为 1/2，
+    // 为保持与幂律剖面相同的 Rc，d0 = -Vp*ln(Rc)/L。
+    // const float damp0 = -Vp_max * std::log(Rc) / thickness;
+    // 原幂律剖面 d(r)=d0*r^NPOW 的标定：
+    const float damp0 = -(NPOW + 1) * Vp_max * std::log(Rc) / (2.0f * thickness);
+    printf("[PML] beta0 = %.3f, p_beta = %.2f, p_alpha = %.2f,"
            " alpha0 = %.1f 1/s, d0 = %.1f 1/s\n",
-           pml_cfs.beta0, pml_cfs.p_d, pml_cfs.p_beta, pml_cfs.p_alpha,
+           pml_cfs.beta0, pml_cfs.p_beta, pml_cfs.p_alpha,
            pml_cfs.alpha0, damp0);
 
     auto profile = [&](float *al, float *be, float *dp, int n, bool lo_pml, bool hi_pml) {
@@ -829,7 +846,9 @@ void MemManager::calc_pml_par() {
                 al[i] = pml_cfs.alpha0;
             } else {
                 float r  = float(k) / float(npd);
-                dp[i] = damp0 * std::pow(r, float(pml_cfs.p_d));
+                // 原幂律剖面：
+                dp[i] = damp0 * std::pow(r, float(NPOW));
+                // dp[i] = 0.5f * damp0 * (1.0f - std::cos(float(M_PI) * r));
                 be[i] = 1.0f + (pml_cfs.beta0 - 1.0f) * std::pow(r, pml_cfs.p_beta);
                 al[i] = pml_cfs.alpha0 * (1.0f - std::pow(r, pml_cfs.p_alpha));
             }
