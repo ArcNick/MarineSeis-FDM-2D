@@ -122,6 +122,8 @@ MemManager::MemManager(const char *filename) {
     pml_cfs.p_beta  = 2.0f;
     pml_cfs.p_alpha = 1.0f;
     pml_cfs.alpha0  = 2 * float(M_PI) * fpeak;
+    pml_par_h.a2    = pml_cfs.alpha0;
+    pml_par_d.a2    = pml_cfs.alpha0;
 
     // ========== allocate memory ===========
     mem_allocate_U();
@@ -298,12 +300,13 @@ MemManager::~MemManager() {
     free_host(flux.nif_h);
 
     free_host(fs_h.Gfs);
-    free_host(fs_h.alm);
+    free_host(fs_h.fsp);
     free_device(fs_d.Gfs);
-    free_device(fs_d.alm);
+    free_device(fs_d.fsp);
 }
 
 // =========== tool functions ===========
+
 void MemManager::grid_cp_h2d() {
     if (calc_type == FANDS) {
         CHECK(cudaMemcpy(Mf_d.rho, Mf_h.rho, nx_fluid * nz_fluid * sizeof(float), cudaMemcpyHostToDevice));
@@ -716,22 +719,28 @@ void MemManager::mem_allocate_PML() {
     pml_par_h.al_xi   = new float[nx];
     pml_par_h.be_xi   = new float[nx];
     pml_par_h.dp_xi   = new float[nx];
+    pml_par_h.dp_ze_par = new float[nx];
     pml_par_h.al_ze_s = new float[nz_solid];
     pml_par_h.be_ze_s = new float[nz_solid];
     pml_par_h.dp_ze_s = new float[nz_solid];
+    pml_par_h.dp_xi_par_s = new float[nz_solid];
     CHECK(cudaMalloc((void**)&pml_par_d.al_xi, nx * sizeof(float)));
     CHECK(cudaMalloc((void**)&pml_par_d.be_xi, nx * sizeof(float)));
     CHECK(cudaMalloc((void**)&pml_par_d.dp_xi, nx * sizeof(float)));
+    CHECK(cudaMalloc((void**)&pml_par_d.dp_ze_par, nx * sizeof(float)));
     CHECK(cudaMalloc((void**)&pml_par_d.al_ze_s, nz_solid * sizeof(float)));
     CHECK(cudaMalloc((void**)&pml_par_d.be_ze_s, nz_solid * sizeof(float)));
     CHECK(cudaMalloc((void**)&pml_par_d.dp_ze_s, nz_solid * sizeof(float)));
+    CHECK(cudaMalloc((void**)&pml_par_d.dp_xi_par_s, nz_solid * sizeof(float)));
     if (calc_type == FANDS) {
         pml_par_h.al_ze_f = new float[nz_fluid];
         pml_par_h.be_ze_f = new float[nz_fluid];
         pml_par_h.dp_ze_f = new float[nz_fluid];
+        pml_par_h.dp_xi_par_f = new float[nz_fluid];
         CHECK(cudaMalloc((void**)&pml_par_d.al_ze_f, nz_fluid * sizeof(float)));
         CHECK(cudaMalloc((void**)&pml_par_d.be_ze_f, nz_fluid * sizeof(float)));
         CHECK(cudaMalloc((void**)&pml_par_d.dp_ze_f, nz_fluid * sizeof(float)));
+        CHECK(cudaMalloc((void**)&pml_par_d.dp_xi_par_f, nz_fluid * sizeof(float)));
     }
 
     // ADE memory: one set per computational direction, full-size arrays (2D is acceptable)
@@ -813,11 +822,11 @@ void MemManager::mem_allocate_flux() {
 void MemManager::mem_allocate_free_surface() {
     if (bdy_type != PANDF) return;
     fs_h.Gfs = new float2[nx * 3];
-    fs_h.alm = new ALM[nx];
+    fs_h.fsp = new FS_par[nx];
     CHECK(cudaMalloc((void**)&fs_d.Gfs, nx * 3 * sizeof(float2)));
-    CHECK(cudaMalloc((void**)&fs_d.alm, nx * sizeof(ALM)));
+    CHECK(cudaMalloc((void**)&fs_d.fsp, nx * sizeof(FS_par)));
     CHECK(cudaMemset(fs_d.Gfs, 0, nx * 3 * sizeof(float2)));
-    CHECK(cudaMemset(fs_d.alm, 0, nx * sizeof(ALM)));
+    CHECK(cudaMemset(fs_d.fsp, 0, nx * sizeof(FS_par)));
     printf("Free surface memory allocation finished.\n");
 }
 
@@ -835,13 +844,16 @@ void MemManager::calc_pml_par() {
            pml_cfs.beta0, pml_cfs.p_beta, pml_cfs.p_alpha,
            pml_cfs.alpha0, damp0);
 
-    auto profile = [&](float *al, float *be, float *dp, int n, bool lo_pml, bool hi_pml) {
+    // al/be/dp: 主阻尼剖面；dpar: MPML 辅助（平行）阻尼 d_2 = p_max * r^2 * d_1
+    auto profile = [&](float *al, float *be, float *dp, float *dpar,
+                       int n, bool lo_pml, bool hi_pml) {
         for (int i = 0; i < n; ++i) {
             int k = -1;
             if (lo_pml && i >= 3 && i <= 2 + pml_span)         k = 3 + pml_span - i;
             if (hi_pml && i >= n - 3 - pml_span && i <= n - 4) k = i - (n - 4 - pml_span);
             if (k <= 0) {
                 dp[i] = 0.0f;
+                if (dpar) dpar[i] = 0.0f;
                 be[i] = 1.0f;
                 al[i] = pml_cfs.alpha0;
             } else {
@@ -851,24 +863,30 @@ void MemManager::calc_pml_par() {
                 // dp[i] = 0.5f * damp0 * (1.0f - std::cos(float(M_PI) * r));
                 be[i] = 1.0f + (pml_cfs.beta0 - 1.0f) * std::pow(r, pml_cfs.p_beta);
                 al[i] = pml_cfs.alpha0 * (1.0f - std::pow(r, pml_cfs.p_alpha));
+                if (dpar) dpar[i] = MPML_P12_CONST ? (MPML_PMAX * dp[i])
+                                                 : (MPML_PMAX * r * r * dp[i]);
             }
         }
     };
 
     // xi axis: left and right are PML for both CPML and PANDF
-    profile(pml_par_h.al_xi, pml_par_h.be_xi, pml_par_h.dp_xi, nx, true, true);
+    profile(pml_par_h.al_xi, pml_par_h.be_xi, pml_par_h.dp_xi,
+            pml_par_h.dp_ze_par, nx, true, true);
 
     // zeta axis
     if (calc_type == SOLID) {
         // top: PML only for CPML (PANDF top is a free surface); bottom: PML
         profile(pml_par_h.al_ze_s, pml_par_h.be_ze_s, pml_par_h.dp_ze_s,
+                pml_par_h.dp_xi_par_s,
                 nz_solid, bdy_type == CPML, true);
     } else { // FANDS
         // fluid (upper zone): top PML only for CPML, bottom is the interface
         profile(pml_par_h.al_ze_f, pml_par_h.be_ze_f, pml_par_h.dp_ze_f,
+                pml_par_h.dp_xi_par_f,
                 nz_fluid, bdy_type == CPML, false);
         // solid (lower zone): top is the interface, bottom is PML
         profile(pml_par_h.al_ze_s, pml_par_h.be_ze_s, pml_par_h.dp_ze_s,
+                pml_par_h.dp_xi_par_s,
                 nz_solid, false, true);
     }
 
@@ -879,13 +897,16 @@ void MemManager::calc_pml_par() {
     upload(pml_par_d.al_xi, pml_par_h.al_xi, nx);
     upload(pml_par_d.be_xi, pml_par_h.be_xi, nx);
     upload(pml_par_d.dp_xi, pml_par_h.dp_xi, nx);
+    upload(pml_par_d.dp_ze_par, pml_par_h.dp_ze_par, nx);
     upload(pml_par_d.al_ze_s, pml_par_h.al_ze_s, nz_solid);
     upload(pml_par_d.be_ze_s, pml_par_h.be_ze_s, nz_solid);
     upload(pml_par_d.dp_ze_s, pml_par_h.dp_ze_s, nz_solid);
+    upload(pml_par_d.dp_xi_par_s, pml_par_h.dp_xi_par_s, nz_solid);
     if (calc_type == FANDS) {
         upload(pml_par_d.al_ze_f, pml_par_h.al_ze_f, nz_fluid);
         upload(pml_par_d.be_ze_f, pml_par_h.be_ze_f, nz_fluid);
         upload(pml_par_d.dp_ze_f, pml_par_h.dp_ze_f, nz_fluid);
+        upload(pml_par_d.dp_xi_par_f, pml_par_h.dp_xi_par_f, nz_fluid);
     }
 }
 
@@ -910,70 +931,27 @@ void MemManager::build_free_surface() {
     for (int ix = 0; ix < nx; ix++) {
         int idx = ix + 3 * nx;
 
-        double xi_x = Jacb_h.xi_x[idx];
-        double xi_z = Jacb_h.xi_z[idx];
         double ze_x = Jacb_h.ze_x[idx];
         double ze_z = Jacb_h.ze_z[idx];
 
-        double m11 = 0.0, m12 = 0.0, m21 = 0.0, m22 = 0.0;
+        // e_xi = (x_xi, z_xi) = J*(ze_z, -ze_x)  =>  tau = (ze_z, -ze_x)/|e^zeta|
+        // |e_xi| = J*|e^zeta|                   =>  invLe = 1/(J*|e^zeta|)
+        double Lz = std::sqrt(ze_x * ze_x + ze_z * ze_z);
+        double J  = Jacb_h.J[idx];
+        float invLe = (Lz > 1e-14 && std::abs(J) > 1e-14)
+                    ? static_cast<float>(1.0 / (J * Lz)) : 0.0f;
+        float tx = (Lz > 1e-14) ? static_cast<float>(ze_z / Lz) : 0.0f;
+        float tz = (Lz > 1e-14) ? static_cast<float>(-ze_x / Lz) : 0.0f;
+        float nx_ = (Lz > 1e-14) ? static_cast<float>(ze_x / Lz) : 0.0f;
+        float nz_ = (Lz > 1e-14) ? static_cast<float>(ze_z / Lz) : 0.0f;
 
-        if (calc_type == SOLID) {
-            double Dz11 = Ms_h.C11[idx] * ze_x * ze_x + Ms_h.C55[idx] * ze_z * ze_z;
-            double Dz12 = (Ms_h.C13[idx] + Ms_h.C55[idx]) * ze_x * ze_z;
-            double Dz22 = Ms_h.C55[idx] * ze_x * ze_x + Ms_h.C33[idx] * ze_z * ze_z;
-
-            double Dx11 = Ms_h.C11[idx] * ze_x * xi_x + Ms_h.C55[idx] * ze_z * xi_z;
-            double Dx12 = Ms_h.C13[idx] * ze_x * xi_z + Ms_h.C55[idx] * ze_z * xi_x;
-            double Dx21 = Ms_h.C13[idx] * ze_z * xi_x + Ms_h.C55[idx] * ze_x * xi_z;
-            double Dx22 = Ms_h.C55[idx] * ze_x * xi_x + Ms_h.C33[idx] * ze_z * xi_z;
-
-            double det = Dz11 * Dz22 - Dz12 * Dz12;
-            if (std::abs(det) < 1e-14) {
-                m11 = m12 = m21 = m22 = 0.0;
-            } else {
-                double inv11 =  Dz22 / det;
-                double inv12 = -Dz12 / det;
-                double inv22 =  Dz11 / det;
-
-                m11 = inv11 * Dx11 + inv12 * Dx21;
-                m12 = inv11 * Dx12 + inv12 * Dx22;
-                m21 = inv12 * Dx11 + inv22 * Dx21;
-                m22 = inv12 * Dx12 + inv22 * Dx22;
-            }
-        } else {
-            double norm2 = ze_x * ze_x + ze_z * ze_z;
-            if (norm2 < 1e-14) {
-                m11 = m12 = m21 = m22 = 0.0;
-            } else {
-                double dot = ze_x * xi_x + ze_z * xi_z;
-                double J   = ze_x * xi_z - ze_z * xi_x;
-
-                m11 =  dot / norm2;
-                m12 =  J   / norm2;
-                m21 = -J   / norm2;
-                m22 =  dot / norm2;
-            }
-        }
-
-        double al1_xx = xi_x - ze_x * m11;
-        double al1_zz = -ze_z * m21;
-        double al1_xz = xi_z - ze_z * m11 - ze_x * m21;
-        double al2_xx = -ze_x * m12;
-        double al2_zz = xi_z - ze_z * m22;
-        double al2_xz = xi_x - ze_z * m12 - ze_x * m22;
-
-        fs_h.alm[ix] = (ALM){
-            static_cast<float>(al1_xx),
-            static_cast<float>(al1_zz),
-            static_cast<float>(al1_xz),
-            static_cast<float>(al2_xx),
-            static_cast<float>(al2_zz),
-            static_cast<float>(al2_xz)
+        fs_h.fsp[ix] = (FS_par){
+            make_float2(tx, tz), make_float2(nx_, nz_), invLe
         };
         fs_h.Gfs[ix] = make_float2(0.0f, 0.0f);
     }
 
-    CHECK(cudaMemcpy(fs_d.alm, fs_h.alm, nx * sizeof(ALM), cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(fs_d.fsp, fs_h.fsp, nx * sizeof(FS_par), cudaMemcpyHostToDevice));
 }
 
 void MemManager::build_constants() {

@@ -55,16 +55,28 @@ struct PML_par {
     float *dp_xi   = nullptr;     // damp
     float *dp_ze_f = nullptr;     // damp
     float *dp_ze_s = nullptr;     // damp
+    // ---- MPML 辅助（平行）阻尼：d_2 = p12 * d_1，p12 = (x/L)^2 * p_max ----
+    float a2           = 0.0f;      // 辅助方向的 CFS 频移（常数 alpha0）
+    float *dp_ze_par   = nullptr;   // ζ 族辅助阻尼（ξ 主阻尼层的切向），按 ix
+    float *dp_xi_par_s = nullptr;   // ξ 族辅助阻尼（固体 ζ 主阻尼层的切向），按 iz
+    float *dp_xi_par_f = nullptr;   // ξ 族辅助阻尼（流体 ζ 主阻尼层的切向），按 iz
 };
 
-struct ALM {
-    float al1_xx;
-    float al1_zz;
-    float al1_xz;
-    float al2_xx;
-    float al2_zz;
-    float al2_xz;
+// 自由表面行（ζ=0）逐列的几何量（局部应变率法，见第三章 3.1.1 / 附录 A）
+//   tau   = e_xi/|e_xi|      面内单位切向
+//   nrm   = e^zeta/|e^zeta|  单位法向
+//   invLe = 1/|e_xi|         切向导数与 ξ 导数的换算系数（∂/∂tau = invLe * ∂/∂ξ）
+struct FS_par {
+    float2 tau;
+    float2 nrm;
+    float  invLe;
 };
+
+// MPML 辅助阻尼剖面的形状参数：d_2 = MPML_PMAX * (x/L)^2 * d_1
+constexpr float MPML_PMAX  = 0.3f;   // 辅助方向阻尼系数 d2 = p12*d1
+constexpr bool  MPML_P12_CONST = false; // true: p12 = p_max 常数；false: p12 = (x/L)^2*p_max（论文式 64）
+constexpr float MPML_BETA2 = 1.0f;
+constexpr bool  MPML_A2_CFS  = true;  // true: 辅助方向也用 CFS 频移；false: 论文式(32) 的 alpha2 = 0
 
 struct PML_cfs {
     float beta0;
@@ -88,7 +100,7 @@ constexpr int IFZ_FREE  = 3;       // Free surface row number
 
 struct Fsurface {
     float2 *Gfs = nullptr;
-    ALM    *alm = nullptr;
+    FS_par *fsp = nullptr;
 };
 
 struct Flux {

@@ -26,55 +26,46 @@ __global__ void update_stress(
     float dvx_dxi = DMac_xi<DIR>(Us.vx, idx);
     float dvz_dxi = DMac_xi<DIR>(Us.vz, idx);
 
-    bool in_side = (unsigned)distx < (unsigned)pml_span_d;
-    bool in_bottom = iz >= nz_all - 3 - pml_span_d;
+    const bool in_xi = (unsigned)distx < (unsigned)pml_span_d;
+    const bool in_ze = iz >= nz_all - 3 - pml_span_d;
+    const PmlRole role = pml_role(
+        in_xi, __ldg(pml.dp_xi + ix), in_ze, __ldg(pml.dp_ze_s + iz)
+    );
+    const bool in_side   = role.pri_xi;
+    const bool in_bottom = role.pri_ze;
 
+    // ================= 自由表面行：局部应变率法 =================
+    // 自由表面上只有 ε_ττ 是自由的：
+    //   ε_ττ,t = (1/|e_ξ|) (τ · ∂v/∂ξ)             (纯 ξ 导数)
+    //   ε_nn,t = -(C13/C33) ε_ττ,t, ε_ττ之外的局部应变率为 0
+    // 再把局部应变率旋回 x-z 计算应力率。由于消去关系把 1/s_2 完全吸收，
+    // 该行只需要一个标量记忆 V（存放在 ADEs_xi.Ex）。
     if (dist == 0) {
-        Us_k.sx[idx] = (
-            + (Ms.C11[idx] * fs.alm[ix].al1_xx + Ms.C13[idx] * fs.alm[ix].al1_zz) * dvx_dxi
-            + (Ms.C11[idx] * fs.alm[ix].al2_xx + Ms.C13[idx] * fs.alm[ix].al2_zz) * dvz_dxi
-        );
+        const FS_par fp = fs.fsp[ix];
+        const float d_eps = fp.invLe * (fp.tau.x * dvx_dxi + fp.tau.y * dvz_dxi);
 
-        Us_k.sz[idx] = (
-            + (Ms.C13[idx] * fs.alm[ix].al1_xx + Ms.C33[idx] * fs.alm[ix].al1_zz) * dvx_dxi
-            + (Ms.C13[idx] * fs.alm[ix].al2_xx + Ms.C33[idx] * fs.alm[ix].al2_zz) * dvz_dxi
-        );
-
-        Us_k.sxz[idx] = Ms.C55[idx] * (
-            fs.alm[ix].al1_xz * dvx_dxi + fs.alm[ix].al2_xz * dvz_dxi
-        );
-
+        float invb = 1.0f;
         if (in_side) {
-            float dp_be = __ldg(pml.dp_xi + ix) / __ldg(pml.be_xi + ix);  // d / beta
-            float apdp_be = __ldg(pml.al_xi + ix) + dp_be;                // alpha + d / beta
-            float invb = 1.0f / __ldg(pml.be_xi + ix);                    // 1 / beta
-
-            ADEs_xi_k.Ex[idx] = -apdp_be * ADEs_xi.Ex[idx] + dp_be * dvx_dxi;
-            ADEs_xi_k.Ez[idx] = -apdp_be * ADEs_xi.Ez[idx] + dp_be * dvz_dxi;
-
-            const float cxx_x = Ms.C11[idx] * fs.alm[ix].al1_xx + Ms.C13[idx] * fs.alm[ix].al1_zz;
-            const float cxx_z = Ms.C11[idx] * fs.alm[ix].al2_xx + Ms.C13[idx] * fs.alm[ix].al2_zz;
-            Us_k.sx[idx] += (
-                + (invb - 1.0f) * (cxx_x * dvx_dxi + cxx_z * dvz_dxi)
-                - invb * (cxx_x * ADEs_xi.Ex[idx] + cxx_z * ADEs_xi.Ez[idx])
-            );
-
-            const float czz_x = Ms.C13[idx] * fs.alm[ix].al1_xx + Ms.C33[idx] * fs.alm[ix].al1_zz;
-            const float czz_z = Ms.C13[idx] * fs.alm[ix].al2_xx + Ms.C33[idx] * fs.alm[ix].al2_zz;
-
-            Us_k.sz[idx] += (
-                + (invb - 1.0f) * (czz_x * dvx_dxi + czz_z * dvz_dxi)
-                - invb * (czz_x * ADEs_xi.Ex[idx] + czz_z * ADEs_xi.Ez[idx])
-            );
-
-            Us_k.sxz[idx] += Ms.C55[idx] * (
-                + (invb - 1.0f) * (fs.alm[ix].al1_xz * dvx_dxi + fs.alm[ix].al2_xz * dvz_dxi)
-                - invb * (fs.alm[ix].al1_xz * ADEs_xi.Ex[idx]
-                        + fs.alm[ix].al2_xz * ADEs_xi.Ez[idx])
-            );
+            const float dp_be = __ldg(pml.dp_xi + ix) / __ldg(pml.be_xi + ix);
+            const float apdp_be = __ldg(pml.al_xi + ix) + dp_be;
+            invb = 1.0f / __ldg(pml.be_xi + ix);
+            ADEs_xi_k.Ex[idx] = -apdp_be * ADEs_xi.Ex[idx] + dp_be * d_eps;
+        } else {
+            ADEs_xi_k.Ex[idx] = 0.0f;
         }
+
+        const float e_tt = invb * (d_eps - ADEs_xi.Ex[idx]);   // ε̃_ττ
+        const float e_nn = -(Ms.C13[idx] / Ms.C33[idx]) * e_tt;  // (FS-E)
+        const float e_xx = fp.tau.x * fp.tau.x * e_tt + fp.nrm.x * fp.nrm.x * e_nn;
+        const float e_zz = fp.tau.y * fp.tau.y * e_tt + fp.nrm.y * fp.nrm.y * e_nn;
+        const float e_xz = fp.tau.x * fp.tau.y * e_tt + fp.nrm.x * fp.nrm.y * e_nn;
+
+        Us_k.sx[idx]  = Ms.C11[idx] * e_xx + Ms.C13[idx] * e_zz;
+        Us_k.sz[idx]  = Ms.C13[idx] * e_xx + Ms.C33[idx] * e_zz;
+        Us_k.sxz[idx] = 2.0f * Ms.C55[idx] * e_xz;
         return;
     }
+    // ============================================================
 
     float dvx_dze = Mac_dv_dze<DIR>(Us.vx, idx, dist, true);
     float dvz_dze = Mac_dv_dze<DIR>(Us.vz, idx, dist, true);
@@ -172,6 +163,38 @@ __global__ void update_stress(
             - invb * Ms.C55[idx] * Jacb.ze_z[idx] * ADEs_ze.Ex[idx]
             - invb * Ms.C55[idx] * Jacb.ze_x[idx] * ADEs_ze.Ez[idx]
         );
+    }
+
+    // ---- MPML 辅助（平行）阻尼：ξ 主阻尼层内沿 ζ 族方向 ----
+    if (role.aux_ze && dist >= 3) {
+        const float g_zeze = Jacb.J[idx]*Jacb.J[idx] *
+                          (Jacb.xi_x[idx]*Jacb.xi_x[idx] + Jacb.xi_z[idx]*Jacb.xi_z[idx]);
+        const float x_ze = -Jacb.J[idx] * Jacb.xi_z[idx];
+        const float z_ze =  Jacb.J[idx] * Jacb.xi_x[idx];
+        const float d2 = __ldg(pml.dp_ze_par + ix);
+        const float D2_vx = dvx_dze / g_zeze;
+        const float D2_vz = dvz_dze / g_zeze;
+        const float cx = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2_vx, ADEs_ze.Ex[idx], ADEs_ze_k.Ex[idx]);
+        const float cz = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2_vz, ADEs_ze.Ez[idx], ADEs_ze_k.Ez[idx]);
+        Us_k.sx[idx] += Ms.C11[idx] * x_ze * cx + Ms.C13[idx] * z_ze * cz;
+        Us_k.sz[idx] += Ms.C13[idx] * x_ze * cx + Ms.C33[idx] * z_ze * cz;
+        Us_k.sxz[idx] += Ms.C55[idx] * (z_ze * cx + x_ze * cz);
+    }
+
+    // ---- MPML 辅助（平行）阻尼：ζ 主阻尼层内沿 ξ 族方向 ----
+    if (role.aux_xi) {
+        const float g_xixi = Jacb.J[idx]*Jacb.J[idx] *
+                          (Jacb.ze_x[idx]*Jacb.ze_x[idx] + Jacb.ze_z[idx]*Jacb.ze_z[idx]);
+        const float x_xi =  Jacb.J[idx] * Jacb.ze_z[idx];
+        const float z_xi = -Jacb.J[idx] * Jacb.ze_x[idx];
+        const float d2 = __ldg(pml.dp_xi_par_s + iz);
+        const float D2_vx = dvx_dxi / g_xixi;
+        const float D2_vz = dvz_dxi / g_xixi;
+        const float cx = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_ze_s + iz) : 0.0f, D2_vx, ADEs_xi.Ex[idx], ADEs_xi_k.Ex[idx]);
+        const float cz = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_ze_s + iz) : 0.0f, D2_vz, ADEs_xi.Ez[idx], ADEs_xi_k.Ez[idx]);
+        Us_k.sx[idx] += Ms.C11[idx] * x_xi * cx + Ms.C13[idx] * z_xi * cz;
+        Us_k.sz[idx] += Ms.C13[idx] * x_xi * cx + Ms.C33[idx] * z_xi * cz;
+        Us_k.sxz[idx] += Ms.C55[idx] * (z_xi * cx + x_xi * cz);
     }
 }
 
@@ -271,8 +294,13 @@ __global__ void update_velocity(
     }
 
     int distx = min(ix - 3, nx_all - 4 - ix);
-    bool in_side   = (unsigned)distx < (unsigned)pml_span_d;
-    bool in_bottom = iz >= nz_s - 3 - pml_span_d;
+    const bool in_xi = (unsigned)distx < (unsigned)pml_span_d;
+    const bool in_ze = iz >= nz_s - 3 - pml_span_d;
+    const PmlRole role = pml_role(
+        in_xi, __ldg(pml.dp_xi + ix), in_ze, __ldg(pml.dp_ze_s + iz)
+    );
+    const bool in_side   = role.pri_xi;
+    const bool in_bottom = role.pri_ze;
 
     Us_k.vx[idx] = rhodvx_dt / Ms.rho[idx];
     Us_k.vz[idx] = rhodvz_dt / Ms.rho[idx];
@@ -303,6 +331,42 @@ __global__ void update_velocity(
 
         Us_k.vx[idx] += ((invb - 1.0f) * Div_ze_S_x - invb * ADEs_ze.Vx[idx]) / Ms.rho[idx];
         Us_k.vz[idx] += ((invb - 1.0f) * Div_ze_S_z - invb * ADEs_ze.Vz[idx]) / Ms.rho[idx];
+    }
+
+    // ---- MPML 辅助（平行）阻尼：ξ 主阻尼层内沿 ζ 族方向 ----
+    if (role.aux_ze && dist >= 3) {
+        const float g_zeze = Jacb.J[idx]*Jacb.J[idx] *
+                          (Jacb.xi_x[idx]*Jacb.xi_x[idx] + Jacb.xi_z[idx]*Jacb.xi_z[idx]);
+        const float x_ze = -Jacb.J[idx] * Jacb.xi_z[idx];
+        const float z_ze =  Jacb.J[idx] * Jacb.xi_x[idx];
+        const float d2 = __ldg(pml.dp_ze_par + ix);
+        const float D2_sx  = Mac_dv_dze<DIR>(Us.sx,  idx, dist, true) / g_zeze;
+        const float D2_sz  = Mac_dv_dze<DIR>(Us.sz,  idx, dist, true) / g_zeze;
+        const float D2_sxz = Mac_dv_dze<DIR>(Us.sxz, idx, dist, true) / g_zeze;
+        const float D2S_x = x_ze * D2_sx + z_ze * D2_sxz;
+        const float D2S_z = x_ze * D2_sxz + z_ze * D2_sz;
+        const float cvx = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2S_x, ADEs_ze.Vx[idx], ADEs_ze_k.Vx[idx]);
+        const float cvz = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2S_z, ADEs_ze.Vz[idx], ADEs_ze_k.Vz[idx]);
+        Us_k.vx[idx] += cvx / Ms.rho[idx];
+        Us_k.vz[idx] += cvz / Ms.rho[idx];
+    }
+
+    // ---- MPML 辅助（平行）阻尼：ζ 主阻尼层内沿 ξ 族方向 ----
+    if (role.aux_xi) {
+        const float g_xixi = Jacb.J[idx]*Jacb.J[idx] *
+                          (Jacb.ze_x[idx]*Jacb.ze_x[idx] + Jacb.ze_z[idx]*Jacb.ze_z[idx]);
+        const float x_xi =  Jacb.J[idx] * Jacb.ze_z[idx];
+        const float z_xi = -Jacb.J[idx] * Jacb.ze_x[idx];
+        const float d2 = __ldg(pml.dp_xi_par_s + iz);
+        const float D2_sx  = DMac_xi<DIR>(Us.sx,  idx) / g_xixi;
+        const float D2_sz  = DMac_xi<DIR>(Us.sz,  idx) / g_xixi;
+        const float D2_sxz = DMac_xi<DIR>(Us.sxz, idx) / g_xixi;
+        const float D2S_x = x_xi * D2_sx + z_xi * D2_sxz;
+        const float D2S_z = x_xi * D2_sxz + z_xi * D2_sz;
+        const float cvx = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_ze_s + iz) : 0.0f, D2S_x, ADEs_xi.Vx[idx], ADEs_xi_k.Vx[idx]);
+        const float cvz = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_ze_s + iz) : 0.0f, D2S_z, ADEs_xi.Vz[idx], ADEs_xi_k.Vz[idx]);
+        Us_k.vx[idx] += cvx / Ms.rho[idx];
+        Us_k.vz[idx] += cvz / Ms.rho[idx];
     }
 }
 
@@ -433,7 +497,9 @@ __global__ void update_velocity_fluid(
     Uf_k.vz[idx] = rhodvz_dt / Mf.rho[idx];
 
     int distx = min(ix - 3, nx_all - 4 - ix);
-    bool in_side = (unsigned)distx < (unsigned)pml_span_d;
+    const bool in_xi = (unsigned)distx < (unsigned)pml_span_d;
+    const PmlRole role = pml_role(in_xi, __ldg(pml.dp_xi + ix), false, 0.0f);
+    const bool in_side = role.pri_xi;
 
     if (in_side) {
         float dp_be = __ldg(pml.dp_xi + ix) / __ldg(pml.be_xi + ix);
@@ -445,6 +511,23 @@ __global__ void update_velocity_fluid(
 
         Uf_k.vx[idx] += ((invb - 1.0f) * Div_xi_P_x - invb * ADEf_xi.Vx[idx]) / Mf.rho[idx];
         Uf_k.vz[idx] += ((invb - 1.0f) * Div_xi_P_z - invb * ADEf_xi.Vz[idx]) / Mf.rho[idx];
+    }
+
+    // ---- MPML 辅助（平行）阻尼：ξ 主阻尼层内沿 ζ 族方向 ----
+    if (role.aux_ze && min(iz - IFZ_FREE, nz_f - 1 - iz) >= 3) {
+        const float g_zeze = Jacb.J[idx]*Jacb.J[idx] *
+                          (Jacb.xi_x[idx]*Jacb.xi_x[idx] + Jacb.xi_z[idx]*Jacb.xi_z[idx]);
+        const float x_ze = -Jacb.J[idx] * Jacb.xi_z[idx];
+        const float z_ze =  Jacb.J[idx] * Jacb.xi_x[idx];
+        const float d2 = __ldg(pml.dp_ze_par + ix);
+        const float dz_near = min(iz - IFZ_FREE, nz_f - 1 - iz);
+        const float dp_dze = Mac_dv_dze<DIR>(Uf.p, idx, dz_near, false);
+        const float D2S_x = -x_ze * (dp_dze / g_zeze);   // [∇₂^ξ p]_x
+        const float D2S_z = -z_ze * (dp_dze / g_zeze);
+        const float cvx = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2S_x, ADEf_ze.Vx[idx], ADEf_ze_k.Vx[idx]);
+        const float cvz = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2S_z, ADEf_ze.Vz[idx], ADEf_ze_k.Vz[idx]);
+        Uf_k.vx[idx] += cvx / Mf.rho[idx];
+        Uf_k.vz[idx] += cvz / Mf.rho[idx];
     }
 
 }
@@ -468,7 +551,9 @@ __global__ void update_stress_fluid(
     float dvx_dxi = DMac_xi<DIR>(Uf.vx, idx);
     float dvz_dxi = DMac_xi<DIR>(Uf.vz, idx);
 
-    bool in_side = (unsigned)distx < (unsigned)pml_span_d;
+    const bool in_xi = (unsigned)distx < (unsigned)pml_span_d;
+    const PmlRole role = pml_role(in_xi, __ldg(pml.dp_xi + ix), false, 0.0f);
+    const bool in_side = role.pri_xi;
     if (dist_fs == 0) {
         Uf_k.p[idx] = 0.0f;
         return;
@@ -503,6 +588,21 @@ __global__ void update_stress_fluid(
             + invb * Jacb.xi_x[idx] * ADEf_xi.Ex[idx]
             + invb * Jacb.xi_z[idx] * ADEf_xi.Ez[idx]
         );
+    }
+
+    // ---- MPML 辅助（平行）阻尼：ξ 主阻尼层内沿 ζ 族方向 ----
+    if (role.aux_ze && min(iz - IFZ_FREE, nz_f - 1 - iz) >= 3) {
+        const float g_zeze = Jacb.J[idx]*Jacb.J[idx] *
+                          (Jacb.xi_x[idx]*Jacb.xi_x[idx] + Jacb.xi_z[idx]*Jacb.xi_z[idx]);
+        const float x_ze = -Jacb.J[idx] * Jacb.xi_z[idx];
+        const float z_ze =  Jacb.J[idx] * Jacb.xi_x[idx];
+        const float d2 = __ldg(pml.dp_ze_par + ix);
+        const float D2_vx = dvx_dze / g_zeze;    // D₂^ξ v_x
+        const float D2_vz = dvz_dze / g_zeze;
+        const float cx = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2_vx, ADEf_ze.Ex[idx], ADEf_ze_k.Ex[idx]);
+        const float cz = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2_vz, ADEf_ze.Ez[idx], ADEf_ze_k.Ez[idx]);
+            // 压力方程符号：p,t = -K*div(v)，散度修正整体取负
+        Uf_k.p[idx] -= Mf.K[idx] * (x_ze * cx + z_ze * cz);
     }
 }
 
@@ -547,8 +647,13 @@ __global__ void update_stress_solid(
     );
 
     int distx = min(ix - 3, nx_all - 4 - ix);
-    bool in_side = (unsigned)distx < (unsigned)pml_span_d;
-    bool in_bottom = iz >= nz_s - 3 - pml_span_d;
+    const bool in_xi = (unsigned)distx < (unsigned)pml_span_d;
+    const bool in_ze = iz >= nz_s - 3 - pml_span_d;
+    const PmlRole role = pml_role(
+        in_xi, __ldg(pml.dp_xi + ix), in_ze, __ldg(pml.dp_ze_s + iz)
+    );
+    const bool in_side   = role.pri_xi;
+    const bool in_bottom = role.pri_ze;
 
     if (!in_side && !in_bottom) {
         return;
@@ -624,6 +729,38 @@ __global__ void update_stress_solid(
             - invb * Ms.C55[idx] * Jacb.ze_z[idx_J] * ADEs_ze.Ex[idx]
             - invb * Ms.C55[idx] * Jacb.ze_x[idx_J] * ADEs_ze.Ez[idx]
         );
+    }
+
+    // ---- MPML 辅助（平行）阻尼：ξ 主阻尼层内沿 ζ 族方向 ----
+    if (role.aux_ze && iz >= 3) {
+        const float g_zeze = Jacb.J[idx_J]*Jacb.J[idx_J] *
+                          (Jacb.xi_x[idx_J]*Jacb.xi_x[idx_J] + Jacb.xi_z[idx_J]*Jacb.xi_z[idx_J]);
+        const float x_ze = -Jacb.J[idx_J] * Jacb.xi_z[idx_J];
+        const float z_ze =  Jacb.J[idx_J] * Jacb.xi_x[idx_J];
+        const float d2 = __ldg(pml.dp_ze_par + ix);
+        const float D2_vx = dvx_dze / g_zeze;
+        const float D2_vz = dvz_dze / g_zeze;
+        const float cx = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2_vx, ADEs_ze.Ex[idx], ADEs_ze_k.Ex[idx]);
+        const float cz = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2_vz, ADEs_ze.Ez[idx], ADEs_ze_k.Ez[idx]);
+        Us_k.sx[idx] += Ms.C11[idx] * x_ze * cx + Ms.C13[idx] * z_ze * cz;
+        Us_k.sz[idx] += Ms.C13[idx] * x_ze * cx + Ms.C33[idx] * z_ze * cz;
+        Us_k.sxz[idx] += Ms.C55[idx] * (z_ze * cx + x_ze * cz);
+    }
+
+    // ---- MPML 辅助（平行）阻尼：ζ 主阻尼层内沿 ξ 族方向 ----
+    if (role.aux_xi) {
+        const float g_xixi = Jacb.J[idx_J]*Jacb.J[idx_J] *
+                          (Jacb.ze_x[idx_J]*Jacb.ze_x[idx_J] + Jacb.ze_z[idx_J]*Jacb.ze_z[idx_J]);
+        const float x_xi =  Jacb.J[idx_J] * Jacb.ze_z[idx_J];
+        const float z_xi = -Jacb.J[idx_J] * Jacb.ze_x[idx_J];
+        const float d2 = __ldg(pml.dp_xi_par_s + iz);
+        const float D2_vx = dvx_dxi / g_xixi;
+        const float D2_vz = dvz_dxi / g_xixi;
+        const float cx = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_ze_s + iz) : 0.0f, D2_vx, ADEs_xi.Ex[idx], ADEs_xi_k.Ex[idx]);
+        const float cz = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_ze_s + iz) : 0.0f, D2_vz, ADEs_xi.Ez[idx], ADEs_xi_k.Ez[idx]);
+        Us_k.sx[idx] += Ms.C11[idx] * x_xi * cx + Ms.C13[idx] * z_xi * cz;
+        Us_k.sz[idx] += Ms.C13[idx] * x_xi * cx + Ms.C33[idx] * z_xi * cz;
+        Us_k.sxz[idx] += Ms.C55[idx] * (z_xi * cx + x_xi * cz);
     }
 }
 
@@ -716,8 +853,13 @@ __global__ void update_velocity_solid(
     }
 
     int distx = min(ix - 3, nx_all - 4 - ix);
-    bool in_side   = (unsigned)distx < (unsigned)pml_span_d;
-    bool in_bottom = iz >= nz_s - 3 - pml_span_d;
+    const bool in_xi = (unsigned)distx < (unsigned)pml_span_d;
+    const bool in_ze = iz >= nz_s - 3 - pml_span_d;
+    const PmlRole role = pml_role(
+        in_xi, __ldg(pml.dp_xi + ix), in_ze, __ldg(pml.dp_ze_s + iz)
+    );
+    const bool in_side   = role.pri_xi;
+    const bool in_bottom = role.pri_ze;
 
     Us_k.vx[idx] = rhodvx_dt / Ms.rho[idx];
     Us_k.vz[idx] = rhodvz_dt / Ms.rho[idx];
@@ -748,6 +890,42 @@ __global__ void update_velocity_solid(
 
         Us_k.vx[idx] += ((invb - 1.0f) * Div_ze_S_x - invb * ADEs_ze.Vx[idx]) / Ms.rho[idx];
         Us_k.vz[idx] += ((invb - 1.0f) * Div_ze_S_z - invb * ADEs_ze.Vz[idx]) / Ms.rho[idx];
+    }
+
+    // ---- MPML 辅助（平行）阻尼：ξ 主阻尼层内沿 ζ 族方向 ----
+    if (role.aux_ze && iz >= 3) {
+        const float g_zeze = Jacb.J[idx_J]*Jacb.J[idx_J] *
+                          (Jacb.xi_x[idx_J]*Jacb.xi_x[idx_J] + Jacb.xi_z[idx_J]*Jacb.xi_z[idx_J]);
+        const float x_ze = -Jacb.J[idx_J] * Jacb.xi_z[idx_J];
+        const float z_ze =  Jacb.J[idx_J] * Jacb.xi_x[idx_J];
+        const float d2 = __ldg(pml.dp_ze_par + ix);
+        const float D2_sx  = Mac_dv_dze<DIR>(Us.sx,  idx, dist, true) / g_zeze;
+        const float D2_sz  = Mac_dv_dze<DIR>(Us.sz,  idx, dist, true) / g_zeze;
+        const float D2_sxz = Mac_dv_dze<DIR>(Us.sxz, idx, dist, true) / g_zeze;
+        const float D2S_x = x_ze * D2_sx + z_ze * D2_sxz;
+        const float D2S_z = x_ze * D2_sxz + z_ze * D2_sz;
+        const float cvx = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2S_x, ADEs_ze.Vx[idx], ADEs_ze_k.Vx[idx]);
+        const float cvz = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_xi + ix) : 0.0f, D2S_z, ADEs_ze.Vz[idx], ADEs_ze_k.Vz[idx]);
+        Us_k.vx[idx] += cvx / Ms.rho[idx];
+        Us_k.vz[idx] += cvz / Ms.rho[idx];
+    }
+
+    // ---- MPML 辅助（平行）阻尼：ζ 主阻尼层内沿 ξ 族方向 ----
+    if (role.aux_xi) {
+        const float g_xixi = Jacb.J[idx_J]*Jacb.J[idx_J] *
+                          (Jacb.ze_x[idx_J]*Jacb.ze_x[idx_J] + Jacb.ze_z[idx_J]*Jacb.ze_z[idx_J]);
+        const float x_xi =  Jacb.J[idx_J] * Jacb.ze_z[idx_J];
+        const float z_xi = -Jacb.J[idx_J] * Jacb.ze_x[idx_J];
+        const float d2 = __ldg(pml.dp_xi_par_s + iz);
+        const float D2_sx  = DMac_xi<DIR>(Us.sx,  idx) / g_xixi;
+        const float D2_sz  = DMac_xi<DIR>(Us.sz,  idx) / g_xixi;
+        const float D2_sxz = DMac_xi<DIR>(Us.sxz, idx) / g_xixi;
+        const float D2S_x = x_xi * D2_sx + z_xi * D2_sxz;
+        const float D2S_z = x_xi * D2_sxz + z_xi * D2_sz;
+        const float cvx = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_ze_s + iz) : 0.0f, D2S_x, ADEs_xi.Vx[idx], ADEs_xi_k.Vx[idx]);
+        const float cvz = ade_aux_step(d2, MPML_A2_CFS ? __ldg(pml.al_ze_s + iz) : 0.0f, D2S_z, ADEs_xi.Vz[idx], ADEs_xi_k.Vz[idx]);
+        Us_k.vx[idx] += cvx / Ms.rho[idx];
+        Us_k.vz[idx] += cvz / Ms.rho[idx];
     }
 }
 

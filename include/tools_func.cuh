@@ -46,6 +46,46 @@ enum RK4Dir {
     BFBF = 1
 };
 
+// ---------------------------------------------------------------------------
+// MPML（多轴 ADE CFS-PML）方向分配
+//   每个点有两个阻尼轴：ξ 族（与 ξ 导数同族）和 ζ 族（与 ζ 导数同族）。
+//   主阻尼方向取归一化阻尼更大的一侧（角区两侧都进 PML 时任选其一，
+//   取 d 大的一侧可避免在 PML 内边界出现"无阻尼角点"）；
+//   另一个轴作辅助（平行）方向处理：d_2 = MPML_PMAX*(x/L)^2*d_1，β_2 = 1、α_2 = 0。
+// ---------------------------------------------------------------------------
+struct PmlRole {
+    bool pri_xi;   // ξ 族为主阻尼方向
+    bool pri_ze;   // ζ 族为主阻尼方向
+    bool aux_ze;   // ζ 族作 ξ 主阻尼层的平行方向
+    bool aux_xi;   // ξ 族作 ζ 主阻尼层的平行方向
+};
+
+__device__ __forceinline__
+PmlRole pml_role(bool in_xi, float d_xi, bool in_ze, float d_ze) {
+    PmlRole r;
+    r.pri_xi = in_xi;
+    r.pri_ze = in_ze;
+    // 平行（辅助）阻尼只在单侧 PML 区施加；角区两侧都作主方向（与本程序原行为一致），
+    // 这样不会在 PML 内边界附近削弱阻尼，也不需要额外的记忆数组。
+    r.aux_ze = in_xi && !in_ze;
+    r.aux_xi = in_ze && !in_xi;
+    return r;
+}
+
+// 辅助（平行）方向的一步（beta2 = MPML_BETA2，alpha2 由对应主阻尼层的 CFS 剖面给出）：
+//   ∂m/∂t + (alpha2 + d/beta2) m = (d/beta2) * drive
+//   "拉伸后算子"与原始算子之差 = (1/beta2 - 1)*drive - (1/beta2)*m
+// 说明：辅助方向若取 alpha2 = 0（论文式 32 的取法），该方向上就是"普通 PML"，对沿流固
+// 界面传播的波在 ζ 方向的衰减（evanescent）尾部不适宜：实测在界面×PML 区域出现缓慢残余
+// 增长，且增长速率随辅助阻尼强度增大。给辅助方向加上与主方向同一剖面的频移 alpha
+// （即辅助方向也用 CFS 拉伸）后，10 s 残余与完全关掉辅助阻尼时一致。
+__device__ __forceinline__
+float ade_aux_step(float d, float a2, float drive, float m, float &m_k) {
+    const float invb2 = 1.0f / MPML_BETA2;
+    m_k = d * invb2 * (drive - m) - a2 * m;
+    return (invb2 - 1.0f) * drive - invb2 * m;
+}
+
 // DRP/opt MacCorMack
 template<MacDir DIR>
 __device__ __forceinline__
