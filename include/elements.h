@@ -77,6 +77,10 @@ constexpr float MPML_PMAX  = 0.3f;   // 辅助方向阻尼系数 d2 = p12*d1
 constexpr bool  MPML_P12_CONST = false; // true: p12 = p_max 常数；false: p12 = (x/L)^2*p_max（论文式 64）
 constexpr float MPML_BETA2 = 1.0f;
 constexpr bool  MPML_A2_CFS  = true;  // true: 辅助方向也用 CFS 频移；false: 论文式(32) 的 alpha2 = 0
+// 辅助（平行）阻尼的开关与适用范围（诊断/对比用；默认全开、离物理边界 3 行）
+constexpr bool  MPML_AUX_ZE    = true;   // 侧边 PML 的平行方向（ζ 族）
+constexpr bool  MPML_AUX_XI    = true;   // 底边 PML 的平行方向（ξ 族）
+constexpr int   MPML_AUX_GUARD = 3;      // 与自由表面/流固界面至少隔开的行数
 
 struct PML_cfs {
     float beta0;

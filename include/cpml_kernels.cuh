@@ -148,7 +148,7 @@ __global__ void update_stress(
     }
 
     // ---- MPML 辅助（平行）阻尼：ζ 主阻尼层内沿 ξ 族方向 ----
-    if (role.aux_xi) {
+    if (MPML_AUX_XI && role.aux_xi) {
         const float g_xixi = Jacb.J[idx]*Jacb.J[idx] *
                           (Jacb.ze_x[idx]*Jacb.ze_x[idx] + Jacb.ze_z[idx]*Jacb.ze_z[idx]);
         const float x_xi =  Jacb.J[idx] * Jacb.ze_z[idx];
@@ -276,7 +276,7 @@ __global__ void update_velocity(
     }
 
     // ---- MPML 辅助（平行）阻尼：ζ 主阻尼层内沿 ξ 族方向 ----
-    if (role.aux_xi) {
+    if (MPML_AUX_XI && role.aux_xi) {
         const float g_xixi = Jacb.J[idx]*Jacb.J[idx] *
                           (Jacb.ze_x[idx]*Jacb.ze_x[idx] + Jacb.ze_z[idx]*Jacb.ze_z[idx]);
         const float x_xi =  Jacb.J[idx] * Jacb.ze_z[idx];
@@ -424,7 +424,7 @@ __global__ void update_velocity_fluid(
     }
 
     // ---- MPML 辅助（平行）阻尼：ξ 主阻尼层内沿 ζ 族方向 ----
-    if (role.aux_ze && nz_f - 1 - iz >= 3) {
+    if (MPML_AUX_ZE && role.aux_ze && nz_f - 1 - iz >= MPML_AUX_GUARD) {
         const float g_zeze = Jacb.J[idx]*Jacb.J[idx] *
                           (Jacb.xi_x[idx]*Jacb.xi_x[idx] + Jacb.xi_z[idx]*Jacb.xi_z[idx]);
         const float x_ze = -Jacb.J[idx] * Jacb.xi_z[idx];
@@ -440,7 +440,7 @@ __global__ void update_velocity_fluid(
     }
 
     // ---- MPML 辅助（平行）阻尼：ζ 主阻尼层内沿 ξ 族方向 ----
-    if (role.aux_xi) {
+    if (MPML_AUX_XI && role.aux_xi) {
         const float g_xixi = Jacb.J[idx]*Jacb.J[idx] *
                           (Jacb.ze_x[idx]*Jacb.ze_x[idx] + Jacb.ze_z[idx]*Jacb.ze_z[idx]);
         const float x_xi =  Jacb.J[idx] * Jacb.ze_z[idx];
@@ -534,7 +534,7 @@ __global__ void update_stress_fluid(
     }
 
     // ---- MPML 辅助（平行）阻尼：ξ 主阻尼层内沿 ζ 族方向 ----
-    if (role.aux_ze && nz_f - 1 - iz >= 3) {
+    if (MPML_AUX_ZE && role.aux_ze && nz_f - 1 - iz >= MPML_AUX_GUARD) {
         const float g_zeze = Jacb.J[idx]*Jacb.J[idx] *
                           (Jacb.xi_x[idx]*Jacb.xi_x[idx] + Jacb.xi_z[idx]*Jacb.xi_z[idx]);
         const float x_ze = -Jacb.J[idx] * Jacb.xi_z[idx];
@@ -549,7 +549,7 @@ __global__ void update_stress_fluid(
     }
 
     // ---- MPML 辅助（平行）阻尼：ζ 主阻尼层内沿 ξ 族方向 ----
-    if (role.aux_xi) {
+    if (MPML_AUX_XI && role.aux_xi) {
         const float g_xixi = Jacb.J[idx]*Jacb.J[idx] *
                           (Jacb.ze_x[idx]*Jacb.ze_x[idx] + Jacb.ze_z[idx]*Jacb.ze_z[idx]);
         const float x_xi =  Jacb.J[idx] * Jacb.ze_z[idx];
@@ -690,7 +690,7 @@ __global__ void update_stress_solid(
     }
 
     // ---- MPML 辅助（平行）阻尼：ξ 主阻尼层内沿 ζ 族方向 ----
-    if (role.aux_ze && iz >= 3) {
+    if (MPML_AUX_ZE && role.aux_ze && iz >= MPML_AUX_GUARD) {
         const float g_zeze = Jacb.J[idx_J]*Jacb.J[idx_J] *
                           (Jacb.xi_x[idx_J]*Jacb.xi_x[idx_J] + Jacb.xi_z[idx_J]*Jacb.xi_z[idx_J]);
         const float x_ze = -Jacb.J[idx_J] * Jacb.xi_z[idx_J];
@@ -706,7 +706,7 @@ __global__ void update_stress_solid(
     }
 
     // ---- MPML 辅助（平行）阻尼：ζ 主阻尼层内沿 ξ 族方向 ----
-    if (role.aux_xi) {
+    if (MPML_AUX_XI && role.aux_xi) {
         const float g_xixi = Jacb.J[idx_J]*Jacb.J[idx_J] *
                           (Jacb.ze_x[idx_J]*Jacb.ze_x[idx_J] + Jacb.ze_z[idx_J]*Jacb.ze_z[idx_J]);
         const float x_xi =  Jacb.J[idx_J] * Jacb.ze_z[idx_J];
@@ -853,7 +853,7 @@ __global__ void update_velocity_solid(
     }
 
     // ---- MPML 辅助（平行）阻尼：ξ 主阻尼层内沿 ζ 族方向 ----
-    if (role.aux_ze && iz >= 3) {
+    if (MPML_AUX_ZE && role.aux_ze && iz >= MPML_AUX_GUARD) {
         const float g_zeze = Jacb.J[idx_J]*Jacb.J[idx_J] *
                           (Jacb.xi_x[idx_J]*Jacb.xi_x[idx_J] + Jacb.xi_z[idx_J]*Jacb.xi_z[idx_J]);
         const float x_ze = -Jacb.J[idx_J] * Jacb.xi_z[idx_J];
@@ -871,7 +871,7 @@ __global__ void update_velocity_solid(
     }
 
     // ---- MPML 辅助（平行）阻尼：ζ 主阻尼层内沿 ξ 族方向 ----
-    if (role.aux_xi) {
+    if (MPML_AUX_XI && role.aux_xi) {
         const float g_xixi = Jacb.J[idx_J]*Jacb.J[idx_J] *
                           (Jacb.ze_x[idx_J]*Jacb.ze_x[idx_J] + Jacb.ze_z[idx_J]*Jacb.ze_z[idx_J]);
         const float x_xi =  Jacb.J[idx_J] * Jacb.ze_z[idx_J];
